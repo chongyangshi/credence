@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	defaultCallbackHost string = "localhost"
-	defaultCallbackPort int64  = 18080
+	defaultCallbackHost string = "127.0.0.1"
+	defaultCallbackPort int64  = 18000
 )
 
 // A simple HTTP server for receiving callbacks from the OIDC provider.

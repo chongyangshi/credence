@@ -27,6 +27,7 @@ const (
 )
 
 var (
+	// !!! Hard-coded user configuration section
 	// These OIDC scopes need to be configured with your authorization server
 	// so that the ID token generated will only contain a corresponding claim
 	// if they are requested explicitly. These values are not configurable via
@@ -48,12 +49,12 @@ var (
 )
 
 func Login(cmd *cobra.Command, args []string) error {
-	issuerURL, err := cmd.Flags().GetString("issuer")
+	issuerURL, err := cmd.Flags().GetString(OIDCIssuer)
 	if err != nil {
 		return err
 	}
 
-	issuerAuthorizePath, err := cmd.Flags().GetString("issuer-authorize-path")
+	issuerAuthorizePath, err := cmd.Flags().GetString(OIDCIssuerAuthorizePath)
 	if err != nil {
 		return err
 	}
@@ -61,7 +62,7 @@ func Login(cmd *cobra.Command, args []string) error {
 		issuerAuthorizePath = fmt.Sprintf("/%s", issuerAuthorizePath)
 	}
 
-	issuerTokenPath, err := cmd.Flags().GetString("issuer-token-path")
+	issuerTokenPath, err := cmd.Flags().GetString(OIDCIssuerTokenPath)
 	if err != nil {
 		return err
 	}
@@ -69,12 +70,12 @@ func Login(cmd *cobra.Command, args []string) error {
 		issuerTokenPath = fmt.Sprintf("/%s", issuerTokenPath)
 	}
 
-	issuerCAPath, err := cmd.Flags().GetString("issuer-ca")
+	issuerCAPath, err := cmd.Flags().GetString(OIDCIssuerCA)
 	if err != nil {
 		return err
 	}
 
-	callbackAddr, err := cmd.Flags().GetString("callback-addr")
+	callbackAddr, err := cmd.Flags().GetString(OIDCCallbackAddr)
 	if err != nil {
 		return err
 	}
@@ -89,7 +90,7 @@ func Login(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("scheme of issuer URL must be TLS (https), got %s", issuer.Scheme)
 	}
 
-	clientID, err := cmd.Flags().GetString("client-id")
+	clientID, err := cmd.Flags().GetString(OIDCClientID)
 	if err != nil {
 		return err
 	}
