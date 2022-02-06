@@ -24,6 +24,8 @@ import (
 const (
 	pkceChallengeType = "S256"
 	challengeLength   = 64
+
+	scopeOfflineAccess = "offline_access"
 )
 
 var (
@@ -42,10 +44,6 @@ var (
 		scopePrivilegedActions: true,
 		scopeRegularActions:    false,
 	}
-
-	// Change this if the Kubernetes username claim from OIDC logins needs to
-	// be requested with a different scope (or blank or none at all)
-	scopeUserClaim = "email"
 )
 
 func Login(cmd *cobra.Command, args []string) error {
@@ -71,6 +69,16 @@ func Login(cmd *cobra.Command, args []string) error {
 	}
 
 	issuerCAPath, err := cmd.Flags().GetString(OIDCIssuerCA)
+	if err != nil {
+		return err
+	}
+
+	offlineAccess, err := cmd.Flags().GetBool(OIDCRefreshToken)
+	if err != nil {
+		return err
+	}
+
+	issuerUserScope, err := cmd.Flags().GetString(OIDCIssuerUserScope)
 	if err != nil {
 		return err
 	}
@@ -115,8 +123,11 @@ func Login(cmd *cobra.Command, args []string) error {
 	}()
 
 	scopes := []string{"openid", scopePrivilegedActions, scopeRegularActions}
-	if scopeUserClaim != "" {
-		scopes = append(scopes, scopeUserClaim)
+	if issuerUserScope != "" {
+		scopes = append(scopes, issuerUserScope)
+	}
+	if offlineAccess {
+		scopes = append(scopes, scopeOfflineAccess)
 	}
 
 	authorizeURL := OIDCAuthorizeRequest{
@@ -231,7 +242,7 @@ func getTokenClient(issuerCAPath string) (*http.Client, error) {
 		var err error
 		caCertPool, err = x509.SystemCertPool()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error reading system CA pool: %v", err)
 		}
 	}
 

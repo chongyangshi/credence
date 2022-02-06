@@ -6,7 +6,6 @@ import (
 	"path"
 )
 
-// Used for message passing to OIDC provider only
 type OIDCAuthorizeRequest struct {
 	ClientID     string
 	Nonce        string
@@ -37,7 +36,6 @@ func (r OIDCAuthorizeRequest) ToURLParams(issuer url.URL, authorizePath string) 
 	return issuer.String()
 }
 
-// Used for message passing from HTTP server only
 type OIDCAuthorizeResponse struct {
 	Code  string
 	State string
@@ -45,14 +43,14 @@ type OIDCAuthorizeResponse struct {
 }
 
 type OIDCTokenRequest struct {
-	ClientID     string `form:"client_id"`
-	Code         string `form:"code"`
-	GrantType    string `form:"grant_type"`
-	RedirectURI  string `form:"redirect_uri,omitempty"`
-	RefreshToken string `form:"refresh_token,omitempty"`
+	ClientID     string
+	Code         string
+	GrantType    string
+	RedirectURI  string
+	RefreshToken string
 
-	// Required PKCE fields
-	CodeVerifier string `form:"code_verifier"`
+	// Required PKCE field in lieu of client secret
+	CodeVerifier string
 }
 
 func (r OIDCTokenRequest) ToFormData() string {
@@ -81,5 +79,7 @@ type OIDCTokenResponse struct {
 	ExpiresIn    int    `json:"expires_in"`
 	RefreshToken string `json:"refresh_token"`
 	IDToken      string `json:"id_token"`
-	Error        error
+
+	// Set by handler
+	Error error
 }
