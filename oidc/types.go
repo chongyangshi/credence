@@ -48,6 +48,7 @@ type OIDCTokenRequest struct {
 	GrantType    string
 	RedirectURI  string
 	RefreshToken string
+	Scope        string
 
 	// Required PKCE field in lieu of client secret
 	CodeVerifier string
@@ -66,6 +67,10 @@ func (r OIDCTokenRequest) ToFormData() string {
 
 	if r.RefreshToken != "" {
 		formData.Add("refresh_token", r.RefreshToken)
+	}
+
+	if r.Scope != "" {
+		formData.Add("scope", r.Scope)
 	}
 
 	formData.Add("code_verifier", r.CodeVerifier)
