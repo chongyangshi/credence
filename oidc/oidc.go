@@ -52,14 +52,43 @@ func Login(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error parsing OIDC config flags: %+v", err)
 	}
 
+	scopes := []string{"openid", scopeRegularActions}
+	if config.IssuerUserScope != "" {
+		scopes = append(scopes, config.IssuerUserScope)
+	}
+	if config.OfflineAccess {
+		scopes = append(scopes, scopeOfflineAccess)
+	}
+
+	log.Printf("Authorizing unprivileged access via %s...", config.Issuer)
+	unprivilegedRsp, err := authorize(&config, scopes)
+	if err != nil {
+		log.Printf("Error authorizing unprivileged access via %s: %+v", config.Issuer, err)
+		return err
+	}
+
+	scopes = append(scopes, scopePrivilegedActions)
+	log.Printf("Authorizing privileged access via %s...", config.Issuer)
+	privilegedRsp, err := authorize(&config, scopes)
+	if err != nil {
+		log.Printf("Error authorizing privileged access via %s: %+v", config.Issuer, err)
+		return err
+	}
+
+	fmt.Println(&config, unprivilegedRsp.RefreshToken, []string{"openid", scopeRegularActions})
+	fmt.Println(&config, privilegedRsp.RefreshToken, scopes)
+	return nil
+}
+
+func authorize(config *OIDCConfig, scopes []string) (*OIDCTokenResponse, error) {
 	state, nonce, err := generateStateAndNonce()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	challengeCode, verifier, err := generatePKCEChallenge()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	authorizeResponseChan := make(chan OIDCAuthorizeResponse)
@@ -70,14 +99,6 @@ func Login(cmd *cobra.Command, args []string) error {
 			log.Printf("Error serving authorization callback: %+v", err)
 		}
 	}()
-
-	scopes := []string{"openid", scopePrivilegedActions, scopeRegularActions}
-	if config.IssuerUserScope != "" {
-		scopes = append(scopes, config.IssuerUserScope)
-	}
-	if config.OfflineAccess {
-		scopes = append(scopes, scopeOfflineAccess)
-	}
 
 	authorizeURL := OIDCAuthorizeRequest{
 		ClientID:     config.ClientID,
@@ -92,22 +113,22 @@ func Login(cmd *cobra.Command, args []string) error {
 	}.ToURLParams(*config.Issuer, config.IssuerAuthorizePath)
 	err = browser.OpenURL(authorizeURL)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	authorizeRsp := <-authorizeResponseChan
 	if authorizeRsp.Error != nil {
-		return fmt.Errorf("received error from authorization callback server: %+v", authorizeRsp.Error)
+		return nil, fmt.Errorf("received error from authorization callback server: %+v", authorizeRsp.Error)
 	}
 
 	err = authorizeResponseSrv.Shutdown(context.Background())
 	if err != nil {
-		return fmt.Errorf("error while shutting down authorization callback server: %+v", err)
+		return nil, fmt.Errorf("error while shutting down authorization callback server: %+v", err)
 	}
 
 	tokenClient, err := getTokenClient(config.IssuerCAPath)
 	if err != nil {
-		return fmt.Errorf("cannot create client for token exchange: %+v", err)
+		return nil, fmt.Errorf("cannot create client for token exchange: %+v", err)
 	}
 
 	tokenRequest := OIDCTokenRequest{
@@ -121,42 +142,36 @@ func Login(cmd *cobra.Command, args []string) error {
 	tokenData := tokenRequest.ToFormData()
 	tokenReq, err := http.NewRequest(http.MethodPost, tokenURL, strings.NewReader(tokenData))
 	if err != nil {
-		return fmt.Errorf("error building token request: %+v", err)
+		return nil, fmt.Errorf("error building token request: %+v", err)
 	}
 	tokenReq.Header.Add("Accept", "application/json")
 	tokenReq.Header.Add("Cache-Control", "no-cache")
 	tokenReq.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	rawRsp, err := tokenClient.Do(tokenReq)
 	if err != nil {
-		return fmt.Errorf("error making token request: %+v", err)
+		return nil, fmt.Errorf("error making token request: %+v", err)
 	}
 
 	rspBytes, err := ioutil.ReadAll(rawRsp.Body)
 	defer rawRsp.Body.Close()
 
 	if rawRsp.StatusCode < http.StatusOK || rawRsp.StatusCode >= http.StatusBadRequest {
-		return fmt.Errorf("received bad response from OIDC server (%d): %v", rawRsp.StatusCode, string(rspBytes))
+		return nil, fmt.Errorf("received bad response from OIDC server (%d): %v", rawRsp.StatusCode, string(rspBytes))
 	}
 
 	rsp := OIDCTokenResponse{}
 	err = json.Unmarshal(rspBytes, &rsp)
 	if err != nil {
-		return fmt.Errorf("error parsing token response: %+v", err)
+		return nil, fmt.Errorf("error parsing token response: %+v", err)
 	}
 
-	if err = refresh(&config, rsp.RefreshToken, scopes); err != nil {
-		return fmt.Errorf("error using refresh token: %+v", err)
-	}
-
-	fmt.Println(string(rspBytes))
-
-	return nil
+	return &rsp, nil
 }
 
-func refresh(config *OIDCConfig, refreshToken string, scopes []string) error {
+func refresh(config *OIDCConfig, refreshToken string, scopes []string) (*OIDCTokenResponse, error) {
 	tokenClient, err := getTokenClient(config.IssuerCAPath)
 	if err != nil {
-		return fmt.Errorf("cannot create client for token exchange: %+v", err)
+		return nil, fmt.Errorf("cannot create client for token exchange: %+v", err)
 	}
 
 	tokenRequest := OIDCTokenRequest{
@@ -169,32 +184,30 @@ func refresh(config *OIDCConfig, refreshToken string, scopes []string) error {
 	tokenData := tokenRequest.ToFormData()
 	tokenReq, err := http.NewRequest(http.MethodPost, tokenURL, strings.NewReader(tokenData))
 	if err != nil {
-		return fmt.Errorf("error building refresh token request: %+v", err)
+		return nil, fmt.Errorf("error building refresh token request: %+v", err)
 	}
 	tokenReq.Header.Add("Accept", "application/json")
 	tokenReq.Header.Add("Cache-Control", "no-cache")
 	tokenReq.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	rawRsp, err := tokenClient.Do(tokenReq)
 	if err != nil {
-		return fmt.Errorf("error making refresh token request: %+v", err)
+		return nil, fmt.Errorf("error making refresh token request: %+v", err)
 	}
 
 	rspBytes, err := ioutil.ReadAll(rawRsp.Body)
 	defer rawRsp.Body.Close()
 
 	if rawRsp.StatusCode < http.StatusOK || rawRsp.StatusCode >= http.StatusBadRequest {
-		return fmt.Errorf("received bad response from OIDC server (%d): %v", rawRsp.StatusCode, string(rspBytes))
+		return nil, fmt.Errorf("received bad response from OIDC server (%d): %v", rawRsp.StatusCode, string(rspBytes))
 	}
 
 	rsp := OIDCTokenResponse{}
 	err = json.Unmarshal(rspBytes, &rsp)
 	if err != nil {
-		return fmt.Errorf("error parsing token response: %+v", err)
+		return nil, fmt.Errorf("error parsing token response: %+v", err)
 	}
 
-	fmt.Println(string(rspBytes))
-
-	return nil
+	return &rsp, nil
 }
 
 func generateStateAndNonce() (string, string, error) {
