@@ -22,8 +22,9 @@ func (k *KeychainCredentialStore) RetrieveCredentials(cluster, credentialsType s
 		return nil, fmt.Errorf("error retrieving credentials for %s: %+v", account, err)
 	}
 
+	// Existing credentials not found, should be handled by the caller
 	if payload == nil {
-		return nil, fmt.Errorf("not found: %s", account)
+		return nil, nil
 	}
 
 	credentials, err := credentialsfromKeychainPayload(payload)

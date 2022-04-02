@@ -32,6 +32,7 @@ func init() {
 	oidcCmd.Flags().String(oidc.OIDCCallbackAuthorizePath, "/login/callback", "The local path for receiving authorization code  callback from the OIDC issuer")
 
 	oidcCmd.Flags().String(oidc.KubernetesClusterID, "default", "A string ID corresponding to the name of your cluster for optional multi-cluster support")
+	oidcCmd.Flags().Bool(oidc.KubernetesReauth, false, "If set, force a re-auth through OIDC for the named cluster, even if cached credentials are still valid")
 
 	rootCmd.AddCommand(oidcCmd)
 }

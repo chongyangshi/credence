@@ -23,6 +23,7 @@ const (
 	OIDCCallbackAuthorizePath = "callback-authorize-path"
 
 	KubernetesClusterID = "cluster-id"
+	KubernetesReauth    = "reauth"
 )
 
 type OIDCConfig struct {
@@ -39,6 +40,7 @@ type OIDCConfig struct {
 	CallbackAuthorizePath string
 
 	KubernetesClusterID string
+	KubernetesReauth    bool
 }
 
 func (o *OIDCConfig) FromCobraCommand(cmd *cobra.Command) error {
@@ -99,6 +101,11 @@ func (o *OIDCConfig) FromCobraCommand(cmd *cobra.Command) error {
 	}
 
 	o.KubernetesClusterID, err = cmd.Flags().GetString(KubernetesClusterID)
+	if err != nil {
+		return err
+	}
+
+	o.KubernetesReauth, err = cmd.Flags().GetBool(KubernetesReauth)
 	if err != nil {
 		return err
 	}

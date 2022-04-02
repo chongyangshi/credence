@@ -54,8 +54,6 @@ func Login(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error parsing OIDC config flags: %+v", err)
 	}
 
-	credentialStore := keychain.KeychainCredentialStore{}
-
 	scopes := []string{"openid", scopeRegularActions}
 	if config.IssuerUserScope != "" {
 		scopes = append(scopes, config.IssuerUserScope)
@@ -64,61 +62,142 @@ func Login(cmd *cobra.Command, args []string) error {
 		scopes = append(scopes, scopeOfflineAccess)
 	}
 
-	log.Printf("Authorizing unprivileged access via %s...", config.Issuer)
-	timeOfRequest := time.Now()
-	unprivilegedRsp, err := authorize(&config, scopes)
-	if err != nil {
-		log.Printf("Error authorizing unprivileged access via %s: %+v", config.Issuer, err)
-		return err
-	}
-
-	unprivilegedExpiry, err := getExpectedExpiry(timeOfRequest, unprivilegedRsp.ExpiresIn)
-	if err != nil {
-		log.Printf("Error parsing unprivileged access expiry: %+v", err)
-		return err
-	}
-
-	if err = credentialStore.StoreCredentials(&keychain.KubernetesCredentials{
-		Cluster:         config.KubernetesClusterID,
-		ExpectedExpiry:  unprivilegedExpiry.Format(time.RFC3339),
-		CredentialsType: keychain.CredentialsTypeUnprivileged,
-		AccessToken:     unprivilegedRsp.AccessToken,
-		RefreshToken:    unprivilegedRsp.RefreshToken,
-	}); err != nil {
-		log.Printf("Error storing unprivileged access credentials via %s: %+v", config.Issuer, err)
+	if err := doLogin(config.KubernetesClusterID, keychain.CredentialsTypeUnprivileged, &config, scopes); err != nil {
+		log.Printf("Error authorizing %s access via %s...", keychain.CredentialsTypeUnprivileged, config.Issuer)
 		return err
 	}
 
 	scopes = append(scopes, scopePrivilegedActions)
-	log.Printf("Authorizing privileged access via %s...", config.Issuer)
-	timeOfRequest = time.Now()
-	privilegedRsp, err := authorize(&config, scopes)
-	if err != nil {
-		log.Printf("Error authorizing privileged access via %s: %+v", config.Issuer, err)
+	if err := doLogin(config.KubernetesClusterID, keychain.CredentialsTypePrivileged, &config, scopes); err != nil {
+		log.Printf("Error authorizing %s access via %s...", keychain.CredentialsTypePrivileged, config.Issuer)
 		return err
 	}
-
-	privilegedExpiry, err := getExpectedExpiry(timeOfRequest, privilegedRsp.ExpiresIn)
-	if err != nil {
-		log.Printf("Error parsing unprivileged access expiry: %+v", err)
-		return err
-	}
-
-	if err = credentialStore.StoreCredentials(&keychain.KubernetesCredentials{
-		Cluster:         config.KubernetesClusterID,
-		ExpectedExpiry:  privilegedExpiry.Format(time.RFC3339),
-		CredentialsType: keychain.CredentialsTypePrivileged,
-		AccessToken:     privilegedRsp.AccessToken,
-		RefreshToken:    privilegedRsp.RefreshToken,
-	}); err != nil {
-		log.Printf("Error storing privileged access credentials via %s: %+v", config.Issuer, err)
-		return err
-	}
-
-	fmt.Println(credentialStore.RetrieveCredentials(config.KubernetesClusterID, keychain.CredentialsTypeUnprivileged))
-	fmt.Println(credentialStore.RetrieveCredentials(config.KubernetesClusterID, keychain.CredentialsTypePrivileged))
 
 	return nil
+}
+
+// doLogin performs the OIDC login if the credentials cached in system keychain have expired,
+// or if explicitly requested by the reauth flag in CLI.
+func doLogin(clusterID, credentialsType string, config *OIDCConfig, scopes []string) error {
+
+	credentialStore := keychain.KeychainCredentialStore{}
+
+	// Check if we have existing credentials we can re-use or refresh access with
+	existing, err := credentialStore.RetrieveCredentials(config.KubernetesClusterID, credentialsType)
+	if err != nil {
+		log.Printf("Error loading existing credentials for %s: %+v", clusterID, err)
+		return err
+	}
+
+	credentials, reuse := canReuseCredentials(existing, config, scopes)
+	if !reuse {
+		// If we can't or don't have an existing valid credentials to re-use, request
+		// a new session via OIDC.
+		log.Printf("Authorizing %s access to %s via %s...", credentialsType, clusterID, config.Issuer)
+
+		timeOfRequest := time.Now()
+		rsp, err := authorize(config, scopes)
+		if err != nil {
+			log.Printf("Error authorizing %s access via %s: %+v", credentialsType, config.Issuer, err)
+			return err
+		}
+
+		expectedExpiry, err := getExpectedExpiry(timeOfRequest, rsp.ExpiresIn)
+		if err != nil {
+			log.Printf("Error parsing %s access expiry for %s: %+v", credentialsType, clusterID, err)
+			return err
+		}
+
+		credentials = &keychain.KubernetesCredentials{
+			Cluster:         config.KubernetesClusterID,
+			ExpectedExpiry:  expectedExpiry.Format(time.RFC3339),
+			CredentialsType: credentialsType,
+			AccessToken:     rsp.AccessToken,
+			RefreshToken:    rsp.RefreshToken,
+		}
+	} else {
+		log.Printf("Using existing token for %s access to %s...", credentialsType, clusterID)
+	}
+
+	// Store the new or existing valid credentials in system keychain
+	if err = credentialStore.StoreCredentials(credentials); err != nil {
+		log.Printf(
+			"Error storing %s access credentials via %s for %s: %+v",
+			credentialsType,
+			config.Issuer,
+			clusterID,
+			err,
+		)
+		return err
+	}
+
+	return nil
+}
+
+// Check if we can re-use the provided credentials, also returns refreshed credentials
+// if refreshToken is present and valid for use.
+func canReuseCredentials(credentials *keychain.KubernetesCredentials, config *OIDCConfig, scopes []string) (*keychain.KubernetesCredentials, bool) {
+	// Reauth explicitly requested via CLI
+	if config.KubernetesReauth {
+		return nil, false
+	}
+
+	// Existing credentials not found
+	if credentials == nil {
+		return nil, false
+	}
+
+	expectedExpiry, err := time.Parse(time.RFC3339, credentials.ExpectedExpiry)
+	if err != nil {
+		// Unexpected invalid expiry time estimate recorded, re-auth
+		return nil, false
+	}
+
+	// Credentials should be unexpired, we can re-use. If this fails the user will need to
+	// set the reauth flag and call again.
+	if time.Now().Before(expectedExpiry) {
+		return credentials, true
+	}
+
+	// Access token expired, but we may still be able to use refresh token if set
+	if credentials.RefreshToken == "" {
+		return nil, false
+	}
+
+	// Attempt to refresh, if we fail we must start reauth all over again
+	timeOfRequest := time.Now()
+	rsp, err := refresh(config, credentials.RefreshToken, scopes)
+	if err != nil {
+		log.Printf(
+			"failed to refresh %s token for %s: %+v, trying reauth",
+			credentials.CredentialsType,
+			credentials.Cluster,
+			err,
+		)
+
+		return nil, false
+	}
+
+	// Successfully refreshed access, return new credentials
+	refreshExpiry, err := getExpectedExpiry(timeOfRequest, rsp.ExpiresIn)
+	if err != nil {
+		log.Printf(
+			"Error parsing %s refresh expiry for %s: %+v",
+			credentials.CredentialsType,
+			credentials.Cluster,
+			err,
+		)
+		return nil, false
+	}
+
+	newCredentials := &keychain.KubernetesCredentials{
+		Cluster:         config.KubernetesClusterID,
+		ExpectedExpiry:  refreshExpiry.Format(time.RFC3339),
+		CredentialsType: credentials.CredentialsType,
+		AccessToken:     rsp.AccessToken,
+		RefreshToken:    rsp.RefreshToken,
+	}
+	return newCredentials, true
 }
 
 func authorize(config *OIDCConfig, scopes []string) (*OIDCTokenResponse, error) {
@@ -237,6 +316,10 @@ func refresh(config *OIDCConfig, refreshToken string, scopes []string) (*OIDCTok
 
 	rspBytes, err := ioutil.ReadAll(rawRsp.Body)
 	defer rawRsp.Body.Close()
+
+	if err != nil {
+		return nil, fmt.Errorf("error reading token response: %+v", err)
+	}
 
 	if rawRsp.StatusCode < http.StatusOK || rawRsp.StatusCode >= http.StatusBadRequest {
 		return nil, fmt.Errorf("received bad response from OIDC server (%d): %v", rawRsp.StatusCode, string(rspBytes))
