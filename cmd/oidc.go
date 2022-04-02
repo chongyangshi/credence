@@ -31,5 +31,7 @@ func init() {
 	oidcCmd.Flags().String(oidc.OIDCCallbackAddr, "127.0.0.1:18000", "The local host:port for receiving authorization code callback from the OIDC issuer")
 	oidcCmd.Flags().String(oidc.OIDCCallbackAuthorizePath, "/login/callback", "The local path for receiving authorization code  callback from the OIDC issuer")
 
+	oidcCmd.Flags().String(oidc.KubernetesClusterID, "default", "A string ID corresponding to the name of your cluster for optional multi-cluster support")
+
 	rootCmd.AddCommand(oidcCmd)
 }

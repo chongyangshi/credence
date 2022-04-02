@@ -19,6 +19,8 @@ import (
 
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
+
+	"github.com/chongyangshi/credence/keychain"
 )
 
 const (
@@ -52,6 +54,8 @@ func Login(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error parsing OIDC config flags: %+v", err)
 	}
 
+	credentialStore := keychain.KeychainCredentialStore{}
+
 	scopes := []string{"openid", scopeRegularActions}
 	if config.IssuerUserScope != "" {
 		scopes = append(scopes, config.IssuerUserScope)
@@ -61,22 +65,56 @@ func Login(cmd *cobra.Command, args []string) error {
 	}
 
 	log.Printf("Authorizing unprivileged access via %s...", config.Issuer)
+	timeOfRequest := time.Now()
 	unprivilegedRsp, err := authorize(&config, scopes)
 	if err != nil {
 		log.Printf("Error authorizing unprivileged access via %s: %+v", config.Issuer, err)
 		return err
 	}
 
+	unprivilegedExpiry, err := getExpectedExpiry(timeOfRequest, unprivilegedRsp.ExpiresIn)
+	if err != nil {
+		log.Printf("Error parsing unprivileged access expiry: %+v", err)
+		return err
+	}
+
+	if err = credentialStore.StoreCredentials(&keychain.KubernetesCredentials{
+		Cluster:         config.KubernetesClusterID,
+		ExpectedExpiry:  unprivilegedExpiry.Format(time.RFC3339),
+		CredentialsType: keychain.CredentialsTypeUnprivileged,
+		AccessToken:     unprivilegedRsp.AccessToken,
+		RefreshToken:    unprivilegedRsp.RefreshToken,
+	}); err != nil {
+		log.Printf("Error storing unprivileged access credentials via %s: %+v", config.Issuer, err)
+		return err
+	}
+
 	scopes = append(scopes, scopePrivilegedActions)
 	log.Printf("Authorizing privileged access via %s...", config.Issuer)
+	timeOfRequest = time.Now()
 	privilegedRsp, err := authorize(&config, scopes)
 	if err != nil {
 		log.Printf("Error authorizing privileged access via %s: %+v", config.Issuer, err)
 		return err
 	}
 
-	fmt.Println(&config, unprivilegedRsp.RefreshToken, unprivilegedRsp.Scope)
-	fmt.Println(&config, privilegedRsp.RefreshToken, privilegedRsp.Scope)
+	privilegedExpiry, err := getExpectedExpiry(timeOfRequest, privilegedRsp.ExpiresIn)
+	if err != nil {
+		log.Printf("Error parsing unprivileged access expiry: %+v", err)
+		return err
+	}
+
+	if err = credentialStore.StoreCredentials(&keychain.KubernetesCredentials{
+		Cluster:         config.KubernetesClusterID,
+		ExpectedExpiry:  privilegedExpiry.Format(time.RFC3339),
+		CredentialsType: keychain.CredentialsTypePrivileged,
+		AccessToken:     privilegedRsp.AccessToken,
+		RefreshToken:    privilegedRsp.RefreshToken,
+	}); err != nil {
+		log.Printf("Error storing privileged access credentials via %s: %+v", config.Issuer, err)
+		return err
+	}
+
 	return nil
 }
 
@@ -279,4 +317,15 @@ func getTokenClient(issuerCAPath string) (*http.Client, error) {
 	}
 
 	return tokenClient, nil
+}
+
+func getExpectedExpiry(timeOfRequest time.Time, expiresInSeconds int) (*time.Time, error) {
+	if expiresInSeconds <= 0 {
+		return nil, fmt.Errorf("unexpected negative or zero expiry time: %d", expiresInSeconds)
+	}
+
+	expiryDuration := time.Duration(expiresInSeconds) * time.Second
+	expectedExpiry := timeOfRequest.Add(expiryDuration)
+
+	return &expectedExpiry, nil
 }

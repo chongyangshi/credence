@@ -21,6 +21,8 @@ const (
 
 	OIDCCallbackAddr          = "callback-addr"
 	OIDCCallbackAuthorizePath = "callback-authorize-path"
+
+	KubernetesClusterID = "cluster-id"
 )
 
 type OIDCConfig struct {
@@ -35,6 +37,8 @@ type OIDCConfig struct {
 
 	CallbackAddr          string
 	CallbackAuthorizePath string
+
+	KubernetesClusterID string
 }
 
 func (o *OIDCConfig) FromCobraCommand(cmd *cobra.Command) error {
@@ -90,6 +94,11 @@ func (o *OIDCConfig) FromCobraCommand(cmd *cobra.Command) error {
 	o.CallbackAddr = strings.TrimPrefix(o.CallbackAddr, "http://")
 
 	o.ClientID, err = cmd.Flags().GetString(OIDCClientID)
+	if err != nil {
+		return err
+	}
+
+	o.KubernetesClusterID, err = cmd.Flags().GetString(KubernetesClusterID)
 	if err != nil {
 		return err
 	}
