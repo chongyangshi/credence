@@ -50,30 +50,6 @@ func RegisterHardwareToken() (*u2fhelper.Registration, error) {
 	return u2fhelper.Register(convertedResponse, *challenge, &cfg)
 }
 
-func getU2FDevices() ([]u2f.Device, error) {
-	devices := u2f.Devices()
-	if len(devices) == 0 {
-		return nil, fmt.Errorf("no supported FIDO U2F/WebAuthn devices detected to secure privileged credentials, cannot proceed")
-	}
-
-	openDevices := []u2f.Device{}
-	for i, device := range devices {
-		err := device.Open()
-		if err == nil {
-			openDevices = append(openDevices, devices[i])
-			defer func(i int) {
-				devices[i].Close()
-			}(i)
-
-		}
-	}
-	if len(openDevices) == 0 {
-		return nil, fmt.Errorf("no FIDO U2F/WebAuthn devices connected is available to use, cannot proceed")
-	}
-
-	return openDevices, nil
-}
-
 func doU2FRegistration(encodedChallenge string) (*U2FRegistrationData, error) {
 	request := &u2f.RegisterRequest{
 		Challenge: encodedChallenge,
@@ -81,25 +57,39 @@ func doU2FRegistration(encodedChallenge string) (*U2FRegistrationData, error) {
 		Facet:     u2fFaucetAndID,
 	}
 
-	u2fDevices, err := getU2FDevices()
-	if err != nil {
-		return nil, err
+	devices := u2f.Devices()
+	if len(devices) == 0 {
+		return nil, fmt.Errorf("no supported FIDO U2F devices detected to secure privileged credentials, cannot proceed")
 	}
 
-	fmt.Println("Press button on the FIDO U2F or WebAuthn device used to secure privileged credentials, or Ctrl+C to cancel...")
+	var openDevices []u2f.Device
+	for i, device := range devices {
+		err := device.Open()
+		if err == nil {
+			openDevices = append(openDevices, devices[i])
+			defer func(i int) {
+				devices[i].Close()
+			}(i)
+		}
+	}
+	if len(openDevices) == 0 {
+		return nil, fmt.Errorf("no FIDO U2F devices connected is available to use, cannot proceed")
+	}
+
+	fmt.Println("Press button on the FIDO U2F device used to secure privileged credentials, or Ctrl+C to cancel...")
 	interval := time.NewTicker(pollInterval)
 	waitingForUserPresenceErr := u2f.TestOfUserPresenceRequiredError{}
 	for {
 		select {
 		case <-interval.C:
-			for _, device := range u2fDevices {
+			for _, device := range openDevices {
 				response, err := device.Register(request)
 				if err != nil {
 					if err.Error() == waitingForUserPresenceErr.Error() {
 						continue
 					}
 
-					log.Printf("Got error from FIDO U2F or WebAuthn device pressed: %+v", err)
+					log.Printf("Got error from FIDO U2F device pressed: %+v", err)
 				} else {
 					version, err := device.Version()
 					if err != nil {
@@ -132,25 +122,39 @@ func AuthenticateHardwareToken(rawKeyhandle []byte) (*u2f.AuthenticateResponse, 
 		KeyHandle: base64.RawURLEncoding.EncodeToString(rawKeyhandle),
 	}
 
-	u2fDevices, err := getU2FDevices()
-	if err != nil {
-		return nil, err
+	devices := u2f.Devices()
+	if len(devices) == 0 {
+		return nil, fmt.Errorf("no supported FIDO U2F devices detected to secure privileged credentials, cannot proceed")
 	}
 
-	fmt.Println("Press button on the FIDO U2F or WebAuthn device used to secure privileged credentials, or Ctrl+C to cancel...")
+	var openDevices []u2f.Device
+	for i, device := range devices {
+		err := device.Open()
+		if err == nil {
+			openDevices = append(openDevices, devices[i])
+			defer func(i int) {
+				devices[i].Close()
+			}(i)
+		}
+	}
+	if len(openDevices) == 0 {
+		return nil, fmt.Errorf("no FIDO U2F devices connected is available to use, cannot proceed")
+	}
+
+	fmt.Println("Press button on the FIDO U2F device used to secure privileged credentials, or Ctrl+C to cancel...")
 	interval := time.NewTicker(pollInterval)
 	waitingForUserPresenceErr := u2f.TestOfUserPresenceRequiredError{}
 	for {
 		select {
 		case <-interval.C:
-			for _, device := range u2fDevices {
+			for _, device := range openDevices {
 				response, err := device.Authenticate(request)
 				if err != nil {
 					if err.Error() == waitingForUserPresenceErr.Error() {
 						continue
 					}
 
-					log.Printf("Got error from FIDO U2F or WebAuthn device pressed: %+v", err)
+					log.Printf("Got error from FIDO U2F device pressed: %+v", err)
 				} else {
 					return response, nil
 				}
