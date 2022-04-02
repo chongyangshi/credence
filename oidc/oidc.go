@@ -75,8 +75,8 @@ func Login(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Println(&config, unprivilegedRsp.RefreshToken, []string{"openid", scopeRegularActions})
-	fmt.Println(&config, privilegedRsp.RefreshToken, scopes)
+	fmt.Println(&config, unprivilegedRsp.RefreshToken, unprivilegedRsp.Scope)
+	fmt.Println(&config, privilegedRsp.RefreshToken, privilegedRsp.Scope)
 	return nil
 }
 

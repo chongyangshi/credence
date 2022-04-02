@@ -84,6 +84,7 @@ type OIDCTokenResponse struct {
 	ExpiresIn    int    `json:"expires_in"`
 	RefreshToken string `json:"refresh_token"`
 	IDToken      string `json:"id_token"`
+	Scope        string `json:"scope"`
 
 	// Set by handler
 	Error error
