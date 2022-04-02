@@ -115,6 +115,9 @@ func Login(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	fmt.Println(credentialStore.RetrieveCredentials(config.KubernetesClusterID, keychain.CredentialsTypeUnprivileged))
+	fmt.Println(credentialStore.RetrieveCredentials(config.KubernetesClusterID, keychain.CredentialsTypePrivileged))
+
 	return nil
 }
 
