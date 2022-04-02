@@ -11,6 +11,18 @@ import (
 const (
 	defaultCallbackHost string = "127.0.0.1"
 	defaultCallbackPort int64  = 18000
+	callbackPageContent string = `
+	<html>
+	<header>
+	<title>Successful OAuth Login</title>
+	</header>
+	<body>
+	<p>Received OAuth login response, you can now close this page and return to the command line.</p>
+	<p>This page should close automatically in 5 seconds if JavaScript is enabled.</p>
+	</body>
+	<script type="text/javascript">setTimeout(window.close, 5000);</script>
+	</html>
+	`
 )
 
 // A simple HTTP server for receiving callbacks from the OIDC provider.
@@ -69,7 +81,7 @@ func serveCallbackServer(hostAndPort string, srv *http.Server, responseChan chan
 		}
 
 		w.WriteHeader(http.StatusOK)
-		if _, err = fmt.Fprint(w, "Received OAuth login response, you can now close this page and return to the command line."); err != nil {
+		if _, err = fmt.Fprint(w, callbackPageContent); err != nil {
 			response.Error = fmt.Errorf("error writing callback response: %+v", err)
 		}
 
