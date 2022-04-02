@@ -2,12 +2,8 @@ package oidc
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -20,6 +16,7 @@ import (
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 
+	"github.com/chongyangshi/credence/fido"
 	"github.com/chongyangshi/credence/keychain"
 )
 
@@ -49,6 +46,22 @@ var (
 )
 
 func Login(cmd *cobra.Command, args []string) error {
+	fidoRegisterData, err := fido.RegisterHardwareToken()
+	if err != nil {
+		return err
+	}
+
+	authenticateResponse, err := fido.AuthenticateHardwareToken(fidoRegisterData.KeyHandle)
+	if err != nil {
+		return err
+	}
+
+	authenticateRsp, _ := json.Marshal(authenticateResponse)
+	fmt.Println(string(authenticateRsp))
+
+	// @TODO: write this into the credential circuit
+	return nil
+
 	config := OIDCConfig{}
 	if err := config.FromCobraCommand(cmd); err != nil {
 		return fmt.Errorf("error parsing OIDC config flags: %+v", err)
@@ -334,38 +347,6 @@ func refresh(config *OIDCConfig, refreshToken string, scopes []string) (*OIDCTok
 	return &rsp, nil
 }
 
-func generateStateAndNonce() (string, string, error) {
-	randBuffer := make([]byte, challengeLength)
-	_, err := rand.Read(randBuffer)
-	if err != nil {
-		return "", "", err
-	}
-
-	state := hex.EncodeToString(randBuffer[0 : challengeLength/2])
-	nonce := hex.EncodeToString(randBuffer[challengeLength/2:])
-
-	return state, nonce, nil
-}
-
-func generatePKCEChallenge() (string, string, error) {
-	randBuffer := make([]byte, challengeLength)
-	_, err := rand.Read(randBuffer)
-	if err != nil {
-		return "", "", err
-	}
-
-	verifier := hex.EncodeToString(randBuffer)
-
-	h := sha256.New()
-	_, err = h.Write([]byte(verifier))
-	if err != nil {
-		return "", "", err
-	}
-
-	challengeCode := base64.RawURLEncoding.EncodeToString(h.Sum(nil))
-	return challengeCode, verifier, nil
-}
-
 func getTokenClient(issuerCAPath string) (*http.Client, error) {
 	var caCertPool *x509.CertPool
 	if issuerCAPath != "" {
@@ -403,15 +384,4 @@ func getTokenClient(issuerCAPath string) (*http.Client, error) {
 	}
 
 	return tokenClient, nil
-}
-
-func getExpectedExpiry(timeOfRequest time.Time, expiresInSeconds int) (*time.Time, error) {
-	if expiresInSeconds <= 0 {
-		return nil, fmt.Errorf("unexpected negative or zero expiry time: %d", expiresInSeconds)
-	}
-
-	expiryDuration := time.Duration(expiresInSeconds) * time.Second
-	expectedExpiry := timeOfRequest.Add(expiryDuration)
-
-	return &expectedExpiry, nil
 }
