@@ -1,6 +1,7 @@
 package fido
 
 import (
+	"crypto/x509"
 	"encoding/base64"
 	"fmt"
 	"log"
@@ -27,7 +28,12 @@ type U2FRegistrationData struct {
 	Version string
 }
 
-func RegisterHardwareToken() (*u2fhelper.Registration, error) {
+type U2FAuthenticationData struct {
+	*u2f.AuthenticateResponse
+	NewCounter uint32
+}
+
+func RegisterHardwareToken(caPoolOverride *x509.CertPool) (*u2fhelper.Registration, error) {
 	challenge, err := u2fhelper.NewChallenge(u2fFaucetAndID, []string{u2fFaucetAndID})
 	if err != nil {
 		return nil, err
@@ -46,7 +52,13 @@ func RegisterHardwareToken() (*u2fhelper.Registration, error) {
 		ClientData:       registrationData.ClientData,
 	}
 
+	// Default config with default CA pool, with override configurable via hardcoded option
+	// (see oidc/oidc.go for details.)
 	cfg := u2fhelper.Config{}
+	if caPoolOverride != nil && len(caPoolOverride.Subjects()) > 0 {
+		cfg.RootAttestationCertPool = caPoolOverride
+	}
+
 	return u2fhelper.Register(convertedResponse, *challenge, &cfg)
 }
 
@@ -106,7 +118,7 @@ func doU2FRegistration(encodedChallenge string) (*U2FRegistrationData, error) {
 	}
 }
 
-func AuthenticateHardwareToken(rawKeyhandle []byte) (*u2f.AuthenticateResponse, error) {
+func AuthenticateHardwareToken(registration *u2fhelper.Registration) (*U2FAuthenticationData, error) {
 	challenge, err := u2fhelper.NewChallenge(u2fFaucetAndID, []string{u2fFaucetAndID})
 	if err != nil {
 		return nil, err
@@ -114,12 +126,13 @@ func AuthenticateHardwareToken(rawKeyhandle []byte) (*u2f.AuthenticateResponse, 
 
 	// Format used by github.com/tstranex/u2f
 	encodedChallenge := base64.RawURLEncoding.EncodeToString(challenge.Challenge)
+	encodedKeyhandle := base64.RawURLEncoding.EncodeToString(registration.KeyHandle)
 
 	request := &u2f.AuthenticateRequest{
 		Challenge: encodedChallenge,
 		AppId:     u2fFaucetAndID,
 		Facet:     u2fFaucetAndID,
-		KeyHandle: base64.RawURLEncoding.EncodeToString(rawKeyhandle),
+		KeyHandle: encodedKeyhandle,
 	}
 
 	devices := u2f.Devices()
@@ -156,7 +169,24 @@ func AuthenticateHardwareToken(rawKeyhandle []byte) (*u2f.AuthenticateResponse, 
 
 					log.Printf("Got error from FIDO U2F device pressed: %+v", err)
 				} else {
-					return response, nil
+					// github.com/marshallbrekka/go-u2fhost does not seem to check the signature
+					// or validate it against a CA, so we have to bring github.com/tstranex/u2f
+					// again...
+					newCounter, err := registration.Authenticate(u2fhelper.SignResponse{
+						KeyHandle:     encodedKeyhandle,
+						SignatureData: response.SignatureData,
+						ClientData:    response.ClientData,
+					}, *challenge, uint32(0))
+					if err != nil {
+						return nil, fmt.Errorf("error verifying authentication signature: %+v", err)
+					}
+
+					resp := &U2FAuthenticationData{
+						response,
+						newCounter,
+					}
+
+					return resp, err
 				}
 			}
 		}

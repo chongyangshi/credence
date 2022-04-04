@@ -27,31 +27,13 @@ const (
 	scopeOfflineAccess = "offline_access"
 )
 
-var (
-	// !!! Hard-coded user configuration section
-	// These OIDC scopes need to be configured with your authorization server
-	// so that the ID token generated will only contain a corresponding claim
-	// if they are requested explicitly. These values are not configurable via
-	// the client as the values hardcoded into the binary for keychain access
-	// authorization is part of the security model of credence. If you need
-	// different scope names, you should compile and distribute your own
-	// version of credence after modifying them here.
-	scopePrivilegedActions = "kubernetes_privileged_actions"
-	scopeRegularActions    = "kubernetes_regular_actions"
-
-	scopeIsSensitive = map[string]bool{
-		scopePrivilegedActions: true,
-		scopeRegularActions:    false,
-	}
-)
-
 func Login(cmd *cobra.Command, args []string) error {
-	fidoRegisterData, err := fido.RegisterHardwareToken()
+	fidoRegistration, err := fido.RegisterHardwareToken(overrideDeviceAttestationCAPool)
 	if err != nil {
 		return err
 	}
 
-	authenticateResponse, err := fido.AuthenticateHardwareToken(fidoRegisterData.KeyHandle)
+	authenticateResponse, err := fido.AuthenticateHardwareToken(fidoRegistration)
 	if err != nil {
 		return err
 	}
