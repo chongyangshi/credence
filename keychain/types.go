@@ -17,9 +17,13 @@ type KubernetesCredentials struct {
 	CredentialsType string `json:"credentials_type"`
 	AccessToken     string `json:"access_token"`
 	RefreshToken    string `json:"refresh_token"`
+
+	// KeyHandle from U2F is set by the package for privileged credentials only
+	KeyHandle string `json:"keyhandle"`
 }
 
 func (c *KubernetesCredentials) ToKeychainPayload() ([]byte, error) {
+
 	if c.Cluster == "" {
 		return nil, fmt.Errorf("unexpected unset cluster name for credentials")
 	}

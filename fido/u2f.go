@@ -7,14 +7,14 @@ import (
 	"log"
 	"time"
 
-	u2f "github.com/marshallbrekka/go-u2fhost"
-	u2fhelper "github.com/tstranex/u2f"
+	u2fhost "github.com/marshallbrekka/go-u2fhost"
+	u2f "github.com/tstranex/u2f"
 )
 
 // This implementation uses a mixture of (1) github.com/marshallbrekka/go-u2fhost
-// ("u2f", by Marshall Brekka and others under the MIT License), which provides
+// ("u2fhost", by Marshall Brekka and others under the MIT License), which provides
 // the command line interface with U2F devices but does not implement a parser
-// for registration data; and (2) github.com/tstranex/u2f ("u2fhelper", by Timothy
+// for registration data; and (2) github.com/tstranex/u2f ("u2f", by Timothy
 // Stranex and others under the MIT License), which implements the registration
 // parser but not the U2F command line interface.
 
@@ -24,17 +24,17 @@ const (
 )
 
 type U2FRegistrationData struct {
-	*u2f.RegisterResponse
+	*u2fhost.RegisterResponse
 	Version string
 }
 
 type U2FAuthenticationData struct {
-	*u2f.AuthenticateResponse
+	*u2fhost.AuthenticateResponse
 	NewCounter uint32
 }
 
-func RegisterHardwareToken(caPoolOverride *x509.CertPool) (*u2fhelper.Registration, error) {
-	challenge, err := u2fhelper.NewChallenge(u2fFaucetAndID, []string{u2fFaucetAndID})
+func RegisterHardwareToken(caPoolOverride *x509.CertPool) (*u2f.Registration, error) {
+	challenge, err := u2f.NewChallenge(u2fFaucetAndID, []string{u2fFaucetAndID})
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func RegisterHardwareToken(caPoolOverride *x509.CertPool) (*u2fhelper.Registrati
 		return nil, err
 	}
 
-	convertedResponse := u2fhelper.RegisterResponse{
+	convertedResponse := u2f.RegisterResponse{
 		Version:          registrationData.Version,
 		RegistrationData: registrationData.RegistrationData,
 		ClientData:       registrationData.ClientData,
@@ -54,27 +54,27 @@ func RegisterHardwareToken(caPoolOverride *x509.CertPool) (*u2fhelper.Registrati
 
 	// Default config with default CA pool, with override configurable via hardcoded option
 	// (see oidc/oidc.go for details.)
-	cfg := u2fhelper.Config{}
+	cfg := u2f.Config{}
 	if caPoolOverride != nil && len(caPoolOverride.Subjects()) > 0 {
 		cfg.RootAttestationCertPool = caPoolOverride
 	}
 
-	return u2fhelper.Register(convertedResponse, *challenge, &cfg)
+	return u2f.Register(convertedResponse, *challenge, &cfg)
 }
 
 func doU2FRegistration(encodedChallenge string) (*U2FRegistrationData, error) {
-	request := &u2f.RegisterRequest{
+	request := &u2fhost.RegisterRequest{
 		Challenge: encodedChallenge,
 		AppId:     u2fFaucetAndID,
 		Facet:     u2fFaucetAndID,
 	}
 
-	devices := u2f.Devices()
+	devices := u2fhost.Devices()
 	if len(devices) == 0 {
 		return nil, fmt.Errorf("no supported FIDO U2F devices detected to secure privileged credentials, cannot proceed")
 	}
 
-	var openDevices []u2f.Device
+	var openDevices []u2fhost.Device
 	for i, device := range devices {
 		err := device.Open()
 		if err == nil {
@@ -90,7 +90,7 @@ func doU2FRegistration(encodedChallenge string) (*U2FRegistrationData, error) {
 
 	fmt.Println("Press button on the FIDO U2F device used to secure privileged credentials, or Ctrl+C to cancel...")
 	interval := time.NewTicker(pollInterval)
-	waitingForUserPresenceErr := u2f.TestOfUserPresenceRequiredError{}
+	waitingForUserPresenceErr := u2fhost.TestOfUserPresenceRequiredError{}
 	for {
 		select {
 		case <-interval.C:
@@ -118,8 +118,8 @@ func doU2FRegistration(encodedChallenge string) (*U2FRegistrationData, error) {
 	}
 }
 
-func AuthenticateHardwareToken(registration *u2fhelper.Registration) (*U2FAuthenticationData, error) {
-	challenge, err := u2fhelper.NewChallenge(u2fFaucetAndID, []string{u2fFaucetAndID})
+func AuthenticateHardwareToken(registration *u2f.Registration) (*U2FAuthenticationData, error) {
+	challenge, err := u2f.NewChallenge(u2fFaucetAndID, []string{u2fFaucetAndID})
 	if err != nil {
 		return nil, err
 	}
@@ -128,19 +128,19 @@ func AuthenticateHardwareToken(registration *u2fhelper.Registration) (*U2FAuthen
 	encodedChallenge := base64.RawURLEncoding.EncodeToString(challenge.Challenge)
 	encodedKeyhandle := base64.RawURLEncoding.EncodeToString(registration.KeyHandle)
 
-	request := &u2f.AuthenticateRequest{
+	request := &u2fhost.AuthenticateRequest{
 		Challenge: encodedChallenge,
 		AppId:     u2fFaucetAndID,
 		Facet:     u2fFaucetAndID,
 		KeyHandle: encodedKeyhandle,
 	}
 
-	devices := u2f.Devices()
+	devices := u2fhost.Devices()
 	if len(devices) == 0 {
 		return nil, fmt.Errorf("no supported FIDO U2F devices detected to secure privileged credentials, cannot proceed")
 	}
 
-	var openDevices []u2f.Device
+	var openDevices []u2fhost.Device
 	for i, device := range devices {
 		err := device.Open()
 		if err == nil {
@@ -156,7 +156,7 @@ func AuthenticateHardwareToken(registration *u2fhelper.Registration) (*U2FAuthen
 
 	fmt.Println("Press button on the FIDO U2F device used to secure privileged credentials, or Ctrl+C to cancel...")
 	interval := time.NewTicker(pollInterval)
-	waitingForUserPresenceErr := u2f.TestOfUserPresenceRequiredError{}
+	waitingForUserPresenceErr := u2fhost.TestOfUserPresenceRequiredError{}
 	for {
 		select {
 		case <-interval.C:
@@ -172,7 +172,7 @@ func AuthenticateHardwareToken(registration *u2fhelper.Registration) (*U2FAuthen
 					// github.com/marshallbrekka/go-u2fhost does not seem to check the signature
 					// or validate it against a CA, so we have to bring github.com/tstranex/u2f
 					// again...
-					newCounter, err := registration.Authenticate(u2fhelper.SignResponse{
+					newCounter, err := registration.Authenticate(u2f.SignResponse{
 						KeyHandle:     encodedKeyhandle,
 						SignatureData: response.SignatureData,
 						ClientData:    response.ClientData,

@@ -75,7 +75,7 @@ func Login(cmd *cobra.Command, args []string) error {
 // or if explicitly requested by the reauth flag in CLI.
 func doLogin(clusterID, credentialsType string, config *OIDCConfig, scopes []string) error {
 
-	credentialStore := keychain.KeychainCredentialStore{}
+	credentialStore := keychain.KeychainStore{}
 
 	// Check if we have existing credentials we can re-use or refresh access with
 	existing, err := credentialStore.RetrieveCredentials(config.KubernetesClusterID, credentialsType)

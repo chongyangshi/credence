@@ -7,17 +7,18 @@ import (
 )
 
 const (
-	keychainService     = "credence-kubernetes"
-	keychainAccessGroup = "credence"
+	keychainCredentialsService = "credence-kubernetes"
 )
 
-type KeychainCredentialStore struct{}
-
-func (k *KeychainCredentialStore) RetrieveCredentials(cluster, credentialsType string) (*KubernetesCredentials, error) {
+func (k *KeychainStore) RetrieveCredentials(cluster, credentialsType string) (*KubernetesCredentials, error) {
 	account := getKeychainAccount(cluster, credentialsType)
 	label := getKeychainLabel(cluster, credentialsType)
 
-	payload, err := keychain.GetGenericPassword(keychainService, account, label, keychainAccessGroup)
+	if credentialsType == CredentialsTypePrivileged {
+		// @TODO
+	}
+
+	payload, err := keychain.GetGenericPassword(keychainCredentialsService, account, label, keychainAccessGroup)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving credentials for %s: %+v", account, err)
 	}
@@ -35,8 +36,13 @@ func (k *KeychainCredentialStore) RetrieveCredentials(cluster, credentialsType s
 	return credentials, nil
 }
 
-// @TODO: handle credential overwrites.
-func (k *KeychainCredentialStore) StoreCredentials(credentials *KubernetesCredentials) error {
+func (k *KeychainStore) StoreCredentials(credentials *KubernetesCredentials) error {
+	// Store a copy of the U2F keyhandle inside the secret payload for privileged credentials,
+	// which is checked on retrieval to ensure it was the same key.
+	if credentials.CredentialsType == CredentialsTypePrivileged {
+		// @TODO
+	}
+
 	payload, err := credentials.ToKeychainPayload()
 	if err != nil {
 		return err
@@ -48,7 +54,7 @@ func (k *KeychainCredentialStore) StoreCredentials(credentials *KubernetesCreden
 	// Check if item already exists, we can overwrite any older credentials of
 	// the same type for the same cluster, but we need to delete that explicitly.
 
-	existing, err := keychain.GetGenericPassword(keychainService, account, label, keychainAccessGroup)
+	existing, err := keychain.GetGenericPassword(keychainCredentialsService, account, label, keychainAccessGroup)
 	if err != nil {
 		return fmt.Errorf("error checking existence of credentials for %s: %+v", account, err)
 	}
@@ -56,13 +62,13 @@ func (k *KeychainCredentialStore) StoreCredentials(credentials *KubernetesCreden
 		// Found, delete existing item. There is a time-of-check/time-of-use risk if multiple
 		// instances of credence are running at the same time, but re-running the failed
 		// instance will fix it and it should happen rarely.
-		if err = keychain.DeleteGenericPasswordItem(keychainService, account); err != nil {
+		if err = keychain.DeleteGenericPasswordItem(keychainCredentialsService, account); err != nil {
 			return fmt.Errorf("error overwriting existing credentials for %s: %+v", account, err)
 		}
 	}
 
 	item := keychain.NewGenericPassword(
-		keychainService,
+		keychainCredentialsService,
 		account,
 		label,
 		payload,
